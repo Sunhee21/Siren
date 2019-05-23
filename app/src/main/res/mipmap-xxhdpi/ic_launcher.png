@@ -1,0 +1,167 @@
+/*
+ * Copyright (C) 2014 The Android Open Source Project
+ * Copyright (c) 1995, 2013, Oracle and/or its affiliates. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ *
+ * This code is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 only, as
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
+ *
+ * This code is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * version 2 for more details (a copy is included in the LICENSE file that
+ * accompanied this code).
+ *
+ * You should have received a copy of the GNU General Public License version
+ * 2 along with this work; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ * or visit www.oracle.com if you need additional information or have any
+ * questions.
+ */
+
+package java.net;
+
+import static android.system.OsConstants.SOL_SOCKET;
+import static android.system.OsConstants.SO_BINDTODEVICE;
+
+import android.system.ErrnoException;
+import java.io.FileDescriptor;
+import java.io.IOException;
+import java.nio.channels.DatagramChannel;
+import java.security.AccessController;
+import java.security.PrivilegedExceptionAction;
+import libcore.io.Libcore;
+
+/**
+ * This class represents a socket for sending and receiving datagram packets.
+ *
+ * <p>A datagram socket is the sending or receiving point for a packet
+ * delivery service. Each packet sent or received on a datagram socket
+ * is individually addressed and routed. Multiple packets sent from
+ * one machine to another may be routed differently, and may arrive in
+ * any order.
+ *
+ * <p> Where possible, a newly constructed {@code DatagramSocket} has the
+ * {@link SocketOptions#SO_BROADCAST SO_BROADCAST} socket option enabled so as
+ * to allow the transmission of broadcast datagrams. In order to receive
+ * broadcast packets a DatagramSocket should be bound to the wildcard address.
+ * In some implementations, broadcast packets may also be received when
+ * a DatagramSocket is bound to a more specific address.
+ * <p>
+ * Example:
+ * {@code
+ *              DatagramSocket s = new DatagramSocket(null);
+ *              s.bind(new InetSocketAddress(8888));
+ * }
+ * Which is equivalent to:
+ * {@code
+ *              DatagramSocket s = new DatagramSocket(8888);
+ * }
+ * Both cases will create a DatagramSocket able to receive broadcasts on
+ * UDP port 8888.
+ *
+ * @author  Pavani Diwanji
+ * @see     java.net.DatagramPacket
+ * @see     java.nio.channels.DatagramChannel
+ * @since JDK1.0
+ */
+public
+class DatagramSocket implements java.io.Closeable {
+    /**
+     * Various states of this socket.
+     */
+    private boolean created = false;
+    private boolean bound = false;
+    private boolean closed = false;
+    private Object closeLock = new Object();
+
+    /*
+     * The implementation of this DatagramSocket.
+     */
+    DatagramSocketImpl impl;
+
+    /**
+     * Are we using an older DatagramSocketImpl?
+     */
+    boolean oldImpl = false;
+
+    /**
+     * Set when a socket is ST_CONNECTED until we are certain
+     * that any packets which might have been received prior
+     * to calling connect() but not read by the application
+     * have been read. During this time we check the source
+     * address of all packets received to be sure they are from
+     * the connected destination. Other packets are read but
+     * silently dropped.
+     */
+    private boolean explicitFilter = false;
+    private int bytesLeftToFilter;
+    /*
+     * Connection state:
+     * ST_NOT_CONNECTED = socket not connected
+     * ST_CONNECTED = socket connected
+     * ST_CONNECTED_NO_IMPL = socket connected but not at impl level
+     */
+    static final int ST_NOT_CONNECTED = 0;
+    static final int ST_CONNECTED = 1;
+    static final int ST_CONNECTED_NO_IMPL = 2;
+
+    int connectState = ST_NOT_CONNECTED;
+
+    /*
+     * Connected address & port
+     */
+    InetAddress connectedAddress = null;
+    int connectedPort = -1;
+
+    // Android-added: Store pending exception from connect
+    private SocketException pendingConnectException;
+
+    /**
+     * Connects this socket to a remote socket address (IP address + port number).
+     * Binds socket if not already bound.
+     * <p>
+     * @param   address The remote address.
+     * @param   port    The remote port
+     * @throws  SocketException if binding the socket fails.
+     */
+    private synchronized void connectInternal(InetAddress address, int port) throws SocketException {
+        if (port < 0 || port > 0xFFFF) {
+            throw new IllegalArgumentException("connect: " + port);
+        }
+        if (address == null) {
+            throw new IllegalArgumentException("connect: null address");
+        }
+        checkAddress (address, "connect");
+        if (isClosed())
+            return;
+        SecurityManager security = System.getSecurityManager();
+        if (security != null) {
+            if (address.isMulticastAddress()) {
+                security.checkMulticast(address);
+            } else {
+                security.checkConnect(address.getHostAddress(), port);
+                security.checkAccept(address.getHostAddress(), port);
+            }
+        }
+
+        if (!isBound())
+          bind(new InetSocketAddress(0));
+
+        // Android-changed: This section now throws any SocketException generated by connect()
+        // to enable it to be recorded as the pendingConnectException. It has been enclosed in a
+        // try-finally to ensure connectedAddress and connectedPort are set when the exception
+        // is thrown.
+        try {
+            // old impls do not support connect/disconnect
+            // Android-changed: Added special handling for AbstractPlainDatagramSocketImpl in
+            // the condition below.
+            if (oldImpl || (impl instanceof AbstractPlainDatagramSocketImpl &&
+                    ((AbstractPlainDatagramSocketImpl)impl).nativeConnectDisabled())) {
+                connectState = ST_CONNECTED_NO_IMPL;
+ 

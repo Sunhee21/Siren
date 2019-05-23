@@ -1,0 +1,9 @@
+build/
+gradle.properties
+gradlew
+gradlew.bat
+/.gradle/
+/.idea/
+/gradle/
+local.properties
+DaiJia.iml
