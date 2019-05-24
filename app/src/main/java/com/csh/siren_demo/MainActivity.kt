@@ -48,6 +48,15 @@ class MainActivity : AppCompatActivity() {
             .setCacheDir("${this.filesDir}/image/960*540_q100")
             .setQuality(100)
             .setCompressListener(object : ICompress.CompressListener {
+
+                override fun onStart() {
+                    timer = System.currentTimeMillis();
+                }
+
+                override fun onNext(file: File?) {
+                    Log.d(TAG,"File1-------->${file?.absolutePath}")
+                }
+
                 override fun onComplete(photos: MutableList<File>) {
                     Toast.makeText(this@MainActivity,photos[0].absolutePath,Toast.LENGTH_SHORT).show()
                     Log.d(TAG,"耗时1-------->${System.currentTimeMillis()-timer}")
@@ -59,7 +68,6 @@ class MainActivity : AppCompatActivity() {
             })
             .build()
         button.setOnClickListener {
-            timer = System.currentTimeMillis()
             mSiren1.load(photos).compress()
         }
 
@@ -69,6 +77,14 @@ class MainActivity : AppCompatActivity() {
             .setCacheDir("${this.filesDir}/image/1920*1080_q60")
             .setQuality(60)
             .setCompressListener(object : ICompress.CompressListener {
+
+                override fun onStart() {
+                    timer = System.currentTimeMillis();
+                }
+
+                override fun onNext(file: File?) {
+                    Log.d(TAG,"File2-------->${file?.absolutePath}")
+                }
                 override fun onComplete(photos: MutableList<File>) {
                     Log.d(TAG,"耗时2-------->${System.currentTimeMillis()-timer}")
                     Toast.makeText(this@MainActivity,photos[0].absolutePath,Toast.LENGTH_SHORT).show()
@@ -90,6 +106,14 @@ class MainActivity : AppCompatActivity() {
             .setCacheDir("${this.filesDir}/image/960*540_q60")
             .setQuality(60)
             .setCompressListener(object : ICompress.CompressListener {
+                override fun onStart() {
+                    timer = System.currentTimeMillis();
+                }
+
+                override fun onNext(file: File?) {
+                    Log.d(TAG,"File3-------->${file?.absolutePath}")
+                }
+
                 override fun onComplete(photos: MutableList<File>) {
                     Log.d(TAG,"耗时3-------->${System.currentTimeMillis()-timer}")
                     Toast.makeText(this@MainActivity,photos[0].absolutePath,Toast.LENGTH_SHORT).show()

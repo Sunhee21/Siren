@@ -2,6 +2,7 @@ package com.csh.lib_siren;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.IntRange;
@@ -12,6 +13,7 @@ import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -29,7 +31,7 @@ public class Siren implements ICompress {
     private CompressListener compressListener;
 
 
-    private List<ICompressObject> mCompressObjects;
+    private List<ICompressObject> mCompressObjects = new ArrayList<>();
     private List<File> mResults;
     private List<ICompressObject> mFails;
 
@@ -37,12 +39,12 @@ public class Siren implements ICompress {
     private CompressConfig mCompressConfig;
 
 
-    private ExecutorService FIXED_THREAD_EXECUTOR;//线程池实例  设置5个核心线程参与压缩
+//    private ExecutorService FIXED_THREAD_EXECUTOR;//线程池实例  设置5个核心线程参与压缩 效率提升不明显
     private CountDownLatch countDownLatch; //类似计数器，统计所有线程执行完
 
 
     private Siren(CompressConfig mCompressConfig) {
-        FIXED_THREAD_EXECUTOR = Executors.newFixedThreadPool(5);
+//        FIXED_THREAD_EXECUTOR = Executors.newFixedThreadPool(5);
         this.mCompressConfig = mCompressConfig;
         this.compressListener = mCompressConfig.getListener();
     }
@@ -52,7 +54,8 @@ public class Siren implements ICompress {
     }
 
     public Siren load(List<ICompressObject> objects) {
-        this.mCompressObjects = objects;
+        this.mCompressObjects.clear();
+        this.mCompressObjects.addAll(objects);
         return this;
     }
 
@@ -65,8 +68,8 @@ public class Siren implements ICompress {
         mResults = new ArrayList<>();
         mFails = new ArrayList<>();
         countDownLatch = new CountDownLatch(mCompressObjects.size());//计数器重新初始化
-
-        if (mCompressObjects.isEmpty()) {
+        compressListener.onStart();
+        if (mCompressObjects == null || mCompressObjects.isEmpty()) {
             compressListener.onFail(mCompressObjects, "集合内容为空");
             return;
         }
@@ -77,7 +80,6 @@ public class Siren implements ICompress {
                 return;
             }
         }
-
 
         compress(mCompressObjects.get(0));
     }
@@ -90,7 +92,7 @@ public class Siren implements ICompress {
      */
     private void compress(ICompressObject obj) {
         CompressTask task = new CompressTask(obj, mCompressConfig.getCacheDir());
-        FIXED_THREAD_EXECUTOR.execute(task);
+        AsyncTask.SERIAL_EXECUTOR.execute(task);
         nextCompress(obj);
     }
 
@@ -104,7 +106,7 @@ public class Siren implements ICompress {
         int index = mCompressObjects.indexOf(photo);
 
         if (index == mCompressObjects.size() - 1) {
-            new Thread(new Runnable() {
+            AsyncTask.SERIAL_EXECUTOR.execute(new Runnable() {
                 @Override
                 public void run() {
                     try {
@@ -114,7 +116,7 @@ public class Siren implements ICompress {
                     }
                     handler.sendEmptyMessage(SIREN_COMPRESS_DONE);
                 }
-            }).start();
+            });
         } else {
             compress(mCompressObjects.get(index + 1));
         }
@@ -129,6 +131,30 @@ public class Siren implements ICompress {
         compressListener.onComplete(mResults);
     }
 
+
+    @SuppressLint("HandlerLeak")
+    private Handler handler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            switch (msg.what) {
+                case SIREN_COMPRESS_SUCCESS: {
+                    File file = new File((String) msg.obj);
+                    mResults.add(file);
+                    compressListener.onNext(file);
+                    break;
+                }
+                case SIREN_COMPRESS_DONE: {
+                    compressDone();
+                    break;
+                }
+                case SIREN_COMPRESS_FAIL: {
+                    mFails.add((ICompressObject) msg.obj);
+                    break;
+                }
+            }
+        }
+    };
 
     /**
      * 压缩任务
@@ -183,31 +209,7 @@ public class Siren implements ICompress {
     }
 
 
-    public void release() {
-        FIXED_THREAD_EXECUTOR.shutdown();
-    }
 
-    @SuppressLint("HandlerLeak")
-    private Handler handler = new Handler() {
-        @Override
-        public void handleMessage(Message msg) {
-            super.handleMessage(msg);
-            switch (msg.what) {
-                case SIREN_COMPRESS_SUCCESS: {
-                    mResults.add(new File((String) msg.obj));
-                    break;
-                }
-                case SIREN_COMPRESS_DONE: {
-                    compressDone();
-                    break;
-                }
-                case SIREN_COMPRESS_FAIL: {
-                    mFails.add((ICompressObject) msg.obj);
-                    break;
-                }
-            }
-        }
-    };
 
 
     private static final int SIREN_COMPRESS_DONE = 0x02;

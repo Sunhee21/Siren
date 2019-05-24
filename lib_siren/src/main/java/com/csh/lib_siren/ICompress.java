@@ -17,7 +17,14 @@ public interface ICompress {
 
     interface CompressListener {
 
+        default void onStart() {
+
+        }
+
         void onComplete(List<File> photos);
+        default void onNext(File file){
+
+        };//压缩成功一个文件回调一次
         void onFail(List<ICompressObject> photos, String error);
 
     }
