@@ -59,6 +59,12 @@ public class Siren implements ICompress {
         return this;
     }
 
+    public Siren load(ICompressObject objects) {
+        this.mCompressObjects.clear();
+        this.mCompressObjects.add(objects);
+        return this;
+    }
+
 
     /**
      * 开始压缩
